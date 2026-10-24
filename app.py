@@ -6,58 +6,35 @@ import csv
 import pandas as pd
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+import os
+
+from flask_wtf.csrf import CSRFProtect
 
 from database import Base, engine, SessionLocal
 from models import Device, Location, User
 
 
 app = Flask(__name__)
-app.secret_key = "change-me"  # replace with env var in production
+
+# Security: require SECRET_KEY from environment
+secret_key = os.getenv("SECRET_KEY")
+if not secret_key:
+    raise RuntimeError("SECRET_KEY environment variable must be set.")
+app.secret_key = secret_key
+
+# Security: hardened session cookies
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=True,  # requires HTTPS in production
+)
+
+# Security: global CSRF protection for unsafe methods (POST/PUT/PATCH/DELETE)
+csrf = CSRFProtect(app)
 
 
 # Create tables if they do not exist
 Base.metadata.create_all(bind=engine)
-
-
-def ensure_default_users() -> None:
-    """Create initial users if none exist.
-
-    - it_manager (role=manager)
-    - inventory_manager (role=manager)
-    - inventory (role=viewer)
-    """
-
-    with SessionLocal() as db:
-        existing = {
-            u.username
-            for u in db.scalars(select(User)).all()
-        }
-
-        desired = [
-            ("manager@it.com", "IT Manager", "manager", "maurinho"),
-            ("inventory@it.com", "Inventory Manager", "manager", "esko1"),
-            ("user1@it.com", "Inventory Read-Only", "viewer", "esko1"),
-        ]
-
-        new_users = []
-        for username, full_name, role, pw in desired:
-            if username in existing:
-                continue
-            new_users.append(
-                User(
-                    username=username,
-                    full_name=full_name,
-                    role=role,
-                    password_hash=generate_password_hash(pw),
-                )
-            )
-
-        if new_users:
-            db.add_all(new_users)
-            db.commit()
-
-
-ensure_default_users()
 
 
 def login_required(view):
@@ -782,4 +759,4 @@ def import_devices():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
